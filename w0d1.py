@@ -180,7 +180,7 @@ def batched_dot_product_nd(a: t.Tensor, b: t.Tensor) -> t.Tensor:
     Use torch.einsum. You can use the ellipsis "..." in the einsum formula to represent an arbitrary number of dimensions.
     """
     assert a.shape == b.shape
-    pass
+    return t.einsum("b...,b...->b", a, b)
 
 
 actual = batched_dot_product_nd(t.tensor([[1, 1, 0], [0, 0, 1]]), t.tensor([[1, 1, 0], [1, 1, 0]]))
@@ -189,3 +189,54 @@ assert_all_equal(actual, expected)
 actual2 = batched_dot_product_nd(t.arange(12).reshape((3, 2, 2)), t.arange(12).reshape((3, 2, 2)))
 expected2 = t.tensor([14, 126, 366])
 assert_all_equal(actual2, expected2)
+
+# %%
+actual = batched_dot_product_nd(t.tensor([[1, 1, 0], [0, 0, 1]]), t.tensor([[1, 1, 0], [1, 1, 0]]))
+expected = t.tensor([2, 0])
+assert_all_equal(actual, expected)
+actual2 = batched_dot_product_nd(t.arange(12).reshape((3, 2, 2)), t.arange(12).reshape((3, 2, 2)))
+expected2 = t.tensor([14, 126, 366])
+assert_all_equal(actual2, expected2)
+
+
+def identity_matrix(n: int) -> t.Tensor:
+    """Return the identity matrix of size nxn.
+
+    Don't use torch.eye or similar.
+
+    Hint: you can do it with arange, rearrange, and ==.
+    Bonus: find a different way to do it.
+    """
+    assert n >= 0
+    mat = t.arange(n * n).reshape((n, n))
+    sym = rearrange(mat, "i j -> j i")
+    return mat == sym
+
+
+# %%
+def sample_distribution(probs: t.Tensor, n: int) -> t.Tensor:
+    """Return n random samples from probs, where probs is a normalized probability distribution.
+
+    probs: shape (k,) where probs[i] is the probability of event i occurring.
+    n: number of random samples
+
+    Return: shape (n,) where out[i] is an integer indicating which event was sampled.
+
+    Use torch.rand and torch.cumsum to do this without any explicit loops.
+
+    Note: if you think your solution is correct but the test is failing, try increasing the value of n.
+    """
+    assert abs(probs.sum() - 1.0) < 0.001
+    assert (probs >= 0).all()
+    cum_probs = t.cumsum(probs, dim=0)
+    rand_nums = t.rand(n)
+    return (cum_probs.unsqueeze(0) > rand_nums.unsqueeze(1)).to(t.int).argmax(dim=1)
+
+
+n = 10000000
+probs = t.tensor([0.05, 0.1, 0.1, 0.2, 0.15, 0.4])
+print(sample_distribution(probs, n))
+freqs = t.bincount(sample_distribution(probs, n)) / n
+assert_all_close(freqs, probs, rtol=0.001, atol=0.001)
+
+# %%
