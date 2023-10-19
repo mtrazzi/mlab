@@ -239,4 +239,23 @@ print(sample_distribution(probs, n))
 freqs = t.bincount(sample_distribution(probs, n)) / n
 assert_all_close(freqs, probs, rtol=0.001, atol=0.001)
 
+
+# %%
+def classifier_accuracy(scores: t.Tensor, true_classes: t.Tensor) -> t.Tensor:
+    """Return the fraction of inputs for which the maximum score corresponds to the true class for that input.
+
+    scores: shape (batch, n_classes). A higher score[b, i] means that the classifier thinks class i is more likely.
+    true_classes: shape (batch, ). true_classes[b] is an integer from [0...n_classes).
+
+    Use torch.argmax.
+    """
+    assert true_classes.max() < scores.shape[1]
+    corrects = scores.argmax(dim=1) == true_classes
+    return corrects.mean(dtype=t.float32)
+
+
+scores = t.tensor([[0.75, 0.5, 0.25], [0.1, 0.5, 0.4], [0.1, 0.7, 0.2]])
+true_classes = t.tensor([0, 1, 0])
+expected = 2.0 / 3.0
+assert classifier_accuracy(scores, true_classes) == expected
 # %%
