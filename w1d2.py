@@ -65,6 +65,38 @@ preprocess = transforms.Compose(
     [
         transforms.ToTensor(),
         transforms.Resize(size=(224, 224)),
-        transforms.Normalize(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ]
 )
+
+# %%
+with open("w1d2_imagenet_labels.json") as f:
+    imagenet_labels = list(json.load(f).values())
+# %%
+
+
+def predict(model, images: list[Image.Image], print_topk_preds=3) -> list[int]:
+    """
+    Pass the images through the model and print out the top predictions.
+
+    For each image, `display()` the image and the most likely categories according to the model.
+
+    Return: for each image, the index of the top prediction.
+    """
+    model.eval()
+    # convert list of images into a batch of preprocessed tensors using preprocessed
+    x = t.stack([preprocess(image) for image in images])
+    with t.inference_mode():
+        pretrained_categories = model(x)
+    return pretrained_categories.argmax(dim=1)
+
+
+# %%
+images = [Image.open(IMAGE_FOLDER / filename) for filename in tqdm(IMAGE_FILENAMES)]
+
+# %%
+if True:  # MAIN and (not IS_CI):
+    model = models.resnet34(weights="DEFAULT")
+    pretrained_categories = predict(model, images)
+    print(pretrained_categories)
+# %%
