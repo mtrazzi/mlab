@@ -334,7 +334,7 @@ def integer_array_indexing(matrix: t.Tensor, coords: t.Tensor) -> t.Tensor:
 
     Return: (batch, )
     """
-    pass
+    return matrix[list(coords.T)]
 
 
 mat_2d = t.arange(15).view(3, 5)
