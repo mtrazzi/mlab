@@ -50,9 +50,9 @@ class BertSelfAttention(nn.Module):
     def __init__(self, config: BertConfig):
         super().__init__()
         self.config = config
-        self.project_query = nn.Linear(config.hidden_size, config.hidden_size)
-        self.project_key = nn.Linear(config.hidden_size, config.hidden_size)
-        self.project_value = nn.Linear(config.hidden_size, config.hidden_size)
+        self.project_query = nn.Linear(config.hidden_size, config.head_size * config.num_heads)
+        self.project_key = nn.Linear(config.hidden_size, config.head_size * config.num_heads)
+        self.project_value = nn.Linear(config.hidden_size, config.head_size * config.num_heads)
         self.project_output = nn.Linear(config.hidden_size, config.hidden_size)
 
     def attention_pattern_pre_softmax(self, x: t.Tensor) -> t.Tensor:
@@ -69,10 +69,10 @@ class BertSelfAttention(nn.Module):
         Q = self.project_query(x)
         K = self.project_key(x)
 
-        Q = Q.view(batch_size, self.config.num_heads, seq_len, self.config.head_size)
-        K = K.view(batch_size, self.config.num_heads, seq_len, self.config.head_size)
-        QK = t.einsum("bhqi,bhkj->bhqk", Q, K)
-        return QK / t.sqrt(t.tensor([self.config.head_size]))
+        Q = Q.view(batch_size, seq_len, self.config.num_heads, self.config.head_size)
+        K = K.view(batch_size, seq_len, self.config.num_heads, self.config.head_size)
+        QK = t.einsum("bqhi,bkhi->bhqk", Q, K)
+        return QK / self.config.head_size**0.5
 
     def forward(self, x: t.Tensor, additive_attention_mask: Optional[t.Tensor] = None) -> t.Tensor:
         """
