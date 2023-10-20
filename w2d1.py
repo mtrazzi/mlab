@@ -48,7 +48,14 @@ class BertSelfAttention(nn.Module):
     project_output: nn.Linear
 
     def __init__(self, config: BertConfig):
+        # self.project_query.weight = None
+        # self.project_query.bias = None
         super().__init__()
+        self.config = config
+        self.project_query = nn.Linear(config.hidden_size, config.hidden_size)
+        self.project_key = nn.Linear(config.hidden_size, config.hidden_size)
+        self.project_value = nn.Linear(config.hidden_size, config.hidden_size)
+        self.project_output = nn.Linear(config.hidden_size, config.hidden_size)
 
     def attention_pattern_pre_softmax(self, x: t.Tensor) -> t.Tensor:
         """
@@ -57,6 +64,11 @@ class BertSelfAttention(nn.Module):
 
         pattern[batch, head, q, k] should be the match between a query at sequence position q and a key at sequence position k.
         """
+        # Q = self.project_query(x)
+        # K = self.project_key(x)
+        # sc1 = t.dot(Q[1], K[1])
+        # sc2 = t.dot(Q[0], K[1])
+        # score = (sc1 + sc2) / t.sqrt(self.config.head_size)
         return x
 
     def forward(self, x: t.Tensor, additive_attention_mask: Optional[t.Tensor] = None) -> t.Tensor:
@@ -69,7 +81,21 @@ class BertSelfAttention(nn.Module):
 
 
 if MAIN:
-    w2d1_test.test_attention_pattern_pre_softmax(BertSelfAttention)
-    w2d1_test.test_attention(BertSelfAttention)
+    batch_size = 2
+    seq_len = 5
+    hidden_size = 6
+    num_heads = 2
+    import w2d1_solution
+
+    config = w2d1_solution.BertConfig(hidden_size=hidden_size, num_heads=num_heads, head_size=3)
+    ref = w2d1_solution.BertSelfAttention(config)
+
+    yours = BertSelfAttention(config)
+    print(ref.state_dict())
+
+    yours.load_state_dict(ref.state_dict())
+
+    # w2d1_test.test_attention_pattern_pre_softmax(BertSelfAttention)
+    # w2d1_test.test_attention(BertSelfAttention)
 
 # %%
