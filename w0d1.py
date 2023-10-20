@@ -345,3 +345,30 @@ mat_3d = t.arange(2 * 3 * 4).view((2, 3, 4))
 coords_3d = t.tensor([[0, 0, 0], [0, 1, 1], [0, 2, 2], [1, 0, 3], [1, 2, 0]])
 actual = integer_array_indexing(mat_3d, coords_3d)
 assert_all_equal(actual, t.tensor([0, 5, 10, 15, 20]))
+
+
+# %%
+def batched_logsumexp(matrix: t.Tensor) -> t.Tensor:
+    """For each row of the matrix, compute log(sum(exp(row))) in a numerically stable way.
+
+    matrix: shape (batch, n)
+
+    Return: (batch, ). For each i, out[i] = log(sum(exp(matrix[i]))).
+
+    Do this without using PyTorch's logsumexp function.
+
+    A couple useful blogs about this function:
+    - https://leimao.github.io/blog/LogSumExp/
+    - https://gregorygundersen.com/blog/2020/02/09/log-sum-exp/
+    """
+    a = 
+
+
+matrix = t.tensor([[-1000, -1000, -1000, -1000], [1000, 1000, 1000, 1000]])
+expected = t.tensor([-1000 + math.log(4), 1000 + math.log(4)])
+actual = batched_logsumexp(matrix)
+assert_all_close(actual, expected)
+matrix2 = t.randn((10, 20))
+expected2 = t.logsumexp(matrix2, dim=-1)
+actual2 = batched_logsumexp(matrix2)
+assert_all_close(actual2, expected2)
