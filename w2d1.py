@@ -1,4 +1,4 @@
-# %%
+#!/usr/bin/env python3
 import os
 from dataclasses import dataclass
 from typing import List, Optional, Union
@@ -48,8 +48,6 @@ class BertSelfAttention(nn.Module):
     project_output: nn.Linear
 
     def __init__(self, config: BertConfig):
-        # self.project_query.weight = None
-        # self.project_query.bias = None
         super().__init__()
         self.config = config
         self.project_query = nn.Linear(config.hidden_size, config.hidden_size)
@@ -64,12 +62,17 @@ class BertSelfAttention(nn.Module):
 
         pattern[batch, head, q, k] should be the match between a query at sequence position q and a key at sequence position k.
         """
-        # Q = self.project_query(x)
-        # K = self.project_key(x)
-        # sc1 = t.dot(Q[1], K[1])
-        # sc2 = t.dot(Q[0], K[1])
-        # score = (sc1 + sc2) / t.sqrt(self.config.head_size)
-        return x
+        import ipdb
+
+        batch_size = x.shape[0]
+        seq_len = x.shape[1]
+        Q = self.project_query(x)
+        K = self.project_key(x)
+
+        Q = Q.view(batch_size, self.config.num_heads, seq_len, self.config.head_size)
+        K = K.view(batch_size, self.config.num_heads, seq_len, self.config.head_size)
+        QK = t.einsum("bhqi,bhkj->bhqk", Q, K)
+        return QK / t.sqrt(t.tensor([self.config.head_size]))
 
     def forward(self, x: t.Tensor, additive_attention_mask: Optional[t.Tensor] = None) -> t.Tensor:
         """
@@ -91,11 +94,9 @@ if MAIN:
     ref = w2d1_solution.BertSelfAttention(config)
 
     yours = BertSelfAttention(config)
-    print(ref.state_dict())
-
     yours.load_state_dict(ref.state_dict())
 
-    # w2d1_test.test_attention_pattern_pre_softmax(BertSelfAttention)
+    w2d1_test.test_attention_pattern_pre_softmax(BertSelfAttention)
     # w2d1_test.test_attention(BertSelfAttention)
 
 # %%
