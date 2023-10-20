@@ -355,13 +355,16 @@ def batched_logsumexp(matrix: t.Tensor) -> t.Tensor:
 
     Return: (batch, ). For each i, out[i] = log(sum(exp(matrix[i]))).
 
-    Do this without using PyTorch's logsumexp function.
+    Do this without using PyTorch's logsumex
+    p function.
 
     A couple useful blogs about this function:
     - https://leimao.github.io/blog/LogSumExp/
     - https://gregorygundersen.com/blog/2020/02/09/log-sum-exp/
     """
-    a = 
+    maxes = matrix.max(dim=1).values
+    # log sum exp x_n = c + log sum exp(x_n - c)
+    return maxes + t.log(t.sum(t.exp(matrix - maxes.unsqueeze(1)), dim=1))
 
 
 matrix = t.tensor([[-1000, -1000, -1000, -1000], [1000, 1000, 1000, 1000]])
@@ -372,3 +375,5 @@ matrix2 = t.randn((10, 20))
 expected2 = t.logsumexp(matrix2, dim=-1)
 actual2 = batched_logsumexp(matrix2)
 assert_all_close(actual2, expected2)
+
+# %%
