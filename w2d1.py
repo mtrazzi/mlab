@@ -88,7 +88,6 @@ class BertSelfAttention(nn.Module):
         attn_probs = t.softmax(attn_sc, dim=-1)
 
         V = rearrange(V, "b s (nh hs) -> b s nh hs", nh=self.config.num_heads, hs=self.config.head_size)
-        # multiply the values and the attention probabilities like in bert
         values = t.einsum("bhqk,bkhi->bqhi", attn_probs, V)
         values = rearrange(values, "b s nh hs -> b s (nh hs)")
         output = self.project_output(values)
@@ -112,3 +111,43 @@ if MAIN:
     w2d1_test.test_attention(BertSelfAttention)
 
 # %%
+
+
+class LayerNorm(nn.Module):
+    weight: nn.Parameter
+    bias: nn.Parameter
+
+    def __init__(
+        self, normalized_shape: Union[int, tuple, t.Size], eps=1e-05, elementwise_affine=True, device=None, dtype=None
+    ):
+        super(LayerNorm, self).__init__()
+        self.normalized_shape = normalized_shape
+        self.device = device
+        self.dtype = dtype
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        if elementwise_affine:
+            self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        """Initialize the weight and bias, if applicable."""
+        self.weight = nn.Parameter(t.ones(self.normalized_shape, dtype=self.dtype, device=self.device))
+        self.bias = nn.Parameter(t.zeros(self.normalized_shape, dtype=self.dtype, device=self.device))
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        """x and the output should both have shape (batch, *)."""
+        mean = x.mean(dim=-1, keepdim=True)
+        var = x.var(dim=-1, keepdim=True, unbiased=False)
+        if self.elementwise_affine:
+            y = self.weight * ((x - mean) / t.sqrt(var + self.eps)) + self.bias
+        else:
+            y = (x - mean) / t.sqrt(var + self.eps)
+        return y
+
+
+if MAIN:
+    w2d1_test.test_layernorm_mean_1d(LayerNorm)
+    w2d1_test.test_layernorm_mean_2d(LayerNorm)
+    w2d1_test.test_layernorm_std(LayerNorm)
+    w2d1_test.test_layernorm_exact(LayerNorm)
+    w2d1_test.test_layernorm_backward(LayerNorm)
