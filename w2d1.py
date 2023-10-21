@@ -188,18 +188,15 @@ class BertMLP(nn.Module):
 
     def __init__(self, config: BertConfig):
         super().__init__()
-        self.config = config
         self.first_linear = nn.Linear(config.hidden_size, config.intermediate_size)
         self.second_linear = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.layer_norm = nn.LayerNorm(config.hidden_size)
+        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout)
-        self.gelu = nn.GELU()
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         """x has shape (batch, seq, hidden_size)."""
         y = self.first_linear(x)
-        y = self.gelu(y)
-        y = self.dropout(y)
+        y = F.gelu(y)
         y = self.second_linear(y)
         y = self.dropout(y)
         y = self.layer_norm(y + x)
@@ -209,3 +206,43 @@ class BertMLP(nn.Module):
 if MAIN:
     w2d1_test.test_bert_mlp_zero_dropout(BertMLP)
     w2d1_test.test_bert_mlp_one_dropout(BertMLP)
+
+
+class BertAttention(nn.Module):
+    self_attn: BertSelfAttention
+    layer_norm: nn.LayerNorm
+
+    def __init__(self, config: BertConfig):
+        super().__init__()
+        self.self_attn = BertSelfAttention(config)
+        self.dropout = nn.Dropout(config.dropout)
+        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+
+    def forward(self, x: t.Tensor, additive_attention_mask: Optional[t.Tensor] = None) -> t.Tensor:
+        y = self.self_attn(x, additive_attention_mask)
+        y = self.dropout(y)
+        y = self.layer_norm(x + y)
+        return y
+
+
+if MAIN:
+    w2d1_test.test_bert_attention_dropout(BertAttention)
+
+
+class BertBlock(nn.Module):
+    attention: BertAttention
+    mlp: BertMLP
+
+    def __init__(self, config: BertConfig):
+        super().__init__()
+        self.attention = BertAttention(config)
+        self.mlp = BertMLP(config)
+
+    def forward(self, x: t.Tensor, additive_attention_mask: Optional[t.Tensor] = None) -> t.Tensor:
+        y = self.attention(x, additive_attention_mask)
+        y = self.mlp(y)
+        return y
+
+
+if MAIN:
+    w2d1_test.test_bert_block(BertBlock)
