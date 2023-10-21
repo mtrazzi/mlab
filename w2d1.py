@@ -69,8 +69,9 @@ class BertSelfAttention(nn.Module):
         Q = self.project_query(x)
         K = self.project_key(x)
 
-        Q = Q.view(batch_size, seq_len, self.config.num_heads, self.config.head_size)
-        K = K.view(batch_size, seq_len, self.config.num_heads, self.config.head_size)
+        num_heads, head_size = self.config.num_heads, self.config.head_size
+        Q = rearrange(Q, "b s (nh hs) -> b s nh hs", nh=num_heads, hs=head_size)
+        K = rearrange(K, "b s (nh hs) -> b s nh hs", nh=num_heads, hs=head_size)
         QK = t.einsum("bqhi,bkhi->bhqk", Q, K)
         return QK / self.config.head_size**0.5
 
