@@ -53,7 +53,7 @@ class BertSelfAttention(nn.Module):
         self.project_query = nn.Linear(config.hidden_size, config.head_size * config.num_heads)
         self.project_key = nn.Linear(config.hidden_size, config.head_size * config.num_heads)
         self.project_value = nn.Linear(config.hidden_size, config.head_size * config.num_heads)
-        self.project_output = nn.Linear(config.hidden_size, config.hidden_size)
+        self.project_output = nn.Linear(config.head_size * config.num_heads, config.hidden_size)
 
     def attention_pattern_pre_softmax(self, x: t.Tensor) -> t.Tensor:
         """
@@ -62,7 +62,6 @@ class BertSelfAttention(nn.Module):
 
         pattern[batch, head, q, k] should be the match between a query at sequence position q and a key at sequence position k.
         """
-        import ipdb
 
         batch_size = x.shape[0]
         seq_len = x.shape[1]
@@ -81,7 +80,19 @@ class BertSelfAttention(nn.Module):
 
         Return: (batch, seq, hidden_size)
         """
-        return x
+        V = self.project_value(x)
+        attn_sc = self.attention_pattern_pre_softmax(x)
+        if additive_attention_mask:
+            attn_sc += additive_attention_mask
+
+        attn_probs = t.softmax(attn_sc, dim=-1)
+
+        V = rearrange(V, "b s (nh hs) -> b s nh hs", nh=self.config.num_heads, hs=self.config.head_size)
+        # multiply the values and the attention probabilities like in bert
+        values = t.einsum("bhqk,bkhi->bqhi", attn_probs, V)
+        values = rearrange(values, "b s nh hs -> b s (nh hs)")
+        output = self.project_output(values)
+        return output
 
 
 if MAIN:
@@ -98,6 +109,6 @@ if MAIN:
     yours.load_state_dict(ref.state_dict())
 
     w2d1_test.test_attention_pattern_pre_softmax(BertSelfAttention)
-    # w2d1_test.test_attention(BertSelfAttention)
+    w2d1_test.test_attention(BertSelfAttention)
 
 # %%
