@@ -83,12 +83,12 @@ class BertSelfAttention(nn.Module):
         V = self.project_value(x)
         attn_sc = self.attention_pattern_pre_softmax(x)
         if additive_attention_mask:
-            attn_sc += additive_attention_mask
+            attn_sc = attn_sc + additive_attention_mask
 
         attn_probs = t.softmax(attn_sc, dim=-1)
 
-        V = rearrange(V, "b s (nh hs) -> b s nh hs", nh=self.config.num_heads, hs=self.config.head_size)
-        values = t.einsum("bhqk,bkhi->bqhi", attn_probs, V)
+        V = rearrange(V, "b s (nh hs) -> b nh s hs", nh=self.config.num_heads, hs=self.config.head_size)
+        values = t.einsum("bhki,bhqk->bqhi", V, attn_probs)
         values = rearrange(values, "b s nh hs -> b s (nh hs)")
         output = self.project_output(values)
         return output
@@ -192,6 +192,7 @@ class BertMLP(nn.Module):
         self.second_linear = nn.Linear(config.intermediate_size, config.hidden_size)
         self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout)
+        self.gelu = nn.GELU()
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         """x has shape (batch, seq, hidden_size)."""
