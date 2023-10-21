@@ -179,3 +179,33 @@ if MAIN:
     assert repr(Embedding(10, 20)) == repr(t.nn.Embedding(10, 20))
     w2d1_test.test_embedding(Embedding)
     w2d1_test.test_embedding_std(Embedding)
+
+
+class BertMLP(nn.Module):
+    first_linear: nn.Linear
+    second_linear: nn.Linear
+    layer_norm: nn.LayerNorm
+
+    def __init__(self, config: BertConfig):
+        super().__init__()
+        self.config = config
+        self.first_linear = nn.Linear(config.hidden_size, config.intermediate_size)
+        self.second_linear = nn.Linear(config.intermediate_size, config.hidden_size)
+        self.layer_norm = nn.LayerNorm(config.hidden_size)
+        self.dropout = nn.Dropout(config.dropout)
+        self.gelu = nn.GELU()
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        """x has shape (batch, seq, hidden_size)."""
+        y = self.first_linear(x)
+        y = self.gelu(y)
+        y = self.dropout(y)
+        y = self.second_linear(y)
+        y = self.dropout(y)
+        y = self.layer_norm(y + x)
+        return y
+
+
+if MAIN:
+    w2d1_test.test_bert_mlp_zero_dropout(BertMLP)
+    w2d1_test.test_bert_mlp_one_dropout(BertMLP)
