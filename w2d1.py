@@ -103,10 +103,10 @@ if MAIN:
     num_heads = 2
     import w2d1_solution
 
-    config = w2d1_solution.BertConfig(hidden_size=hidden_size, num_heads=num_heads, head_size=3)
-    ref = w2d1_solution.BertSelfAttention(config)
+    config_test = w2d1_solution.BertConfig(hidden_size=hidden_size, num_heads=num_heads, head_size=3)
+    ref = w2d1_solution.BertSelfAttention(config_test)
 
-    yours = BertSelfAttention(config)
+    yours = BertSelfAttention(config_test)
     yours.load_state_dict(ref.state_dict())
 
     w2d1_test.test_attention_pattern_pre_softmax(BertSelfAttention)
@@ -391,3 +391,85 @@ class BertLanguageModel(nn.Module):
 
 if MAIN:
     w2d1_test.test_bert(BertLanguageModel)
+
+
+def load_pretrained_weights(config: BertConfig) -> BertLanguageModel:
+    hf_bert = utils.load_pretrained_bert()
+    "SOLUTION"
+
+    def _copy(mine, theirs):
+        mine.detach().copy_(theirs)
+
+    def _copy_weight_bias(mine, theirs, transpose=False):
+        _copy(mine.weight, theirs.weight.T if transpose else theirs.weight)
+        if getattr(mine, "bias", None) is not None:
+            _copy(mine.bias, theirs.bias)
+
+    mine = BertLanguageModel(config)
+    # Let's set everything to NaN and then we'll know if we missed one.
+    for name, p in mine.named_parameters():
+        p.requires_grad = False
+        p.fill_(t.nan)
+
+    _copy_weight_bias(mine.common.token_embedding, hf_bert.bert.embeddings.word_embeddings)
+    _copy_weight_bias(mine.common.pos_embedding, hf_bert.bert.embeddings.position_embeddings)
+    _copy_weight_bias(mine.common.token_type_embedding, hf_bert.bert.embeddings.token_type_embeddings)
+    _copy_weight_bias(mine.common.layer_norm, hf_bert.bert.embeddings.LayerNorm)
+
+    # Set up type hints so our autocomplete works properly
+    from transformers.models.bert.modeling_bert import BertLayer
+
+    my_block: BertBlock
+    hf_block: BertLayer
+
+    for my_block, hf_block in zip(mine.common.blocks, hf_bert.bert.encoder.layer):  # type: ignore
+        _copy_weight_bias(my_block.attention.self_attn.project_query, hf_block.attention.self.query)
+        _copy_weight_bias(my_block.attention.self_attn.project_key, hf_block.attention.self.key)
+        _copy_weight_bias(my_block.attention.self_attn.project_value, hf_block.attention.self.value)
+        _copy_weight_bias(my_block.attention.self_attn.project_output, hf_block.attention.output.dense)
+        _copy_weight_bias(my_block.attention.layer_norm, hf_block.attention.output.LayerNorm)
+
+        _copy_weight_bias(my_block.mlp.first_linear, hf_block.intermediate.dense)
+        _copy_weight_bias(my_block.mlp.second_linear, hf_block.output.dense)
+        _copy_weight_bias(my_block.mlp.layer_norm, hf_block.output.LayerNorm)
+
+    _copy_weight_bias(mine.lm_linear, hf_bert.cls.predictions.transform.dense)
+    _copy_weight_bias(mine.lm_layer_norm, hf_bert.cls.predictions.transform.LayerNorm)
+
+    assert t.allclose(
+        hf_bert.bert.embeddings.word_embeddings.weight,
+        hf_bert.cls.predictions.decoder.weight,
+    ), "Embed and unembed weight should be the same"
+    # "Cannot assign non-leaf Tensor to parameter 'weight'"
+    # mine.unembed.weight = mine.token_embedding.weight
+
+    # Won't remain tied
+    # mine.unembed.weight = hf_bert.bert.embeddings.word_embeddings.weight
+
+    # Won't remain tied during training
+    # mine.unembed.weight.copy_(mine.token_embedding.weight)
+    # mine.unembed.bias.copy_(hf_bert.cls.predictions.decoder.bias)
+
+    # I think works but maybe less good if others have ref to the old Parameter?
+    # mine.unembed_bias = nn.Parameter(input_embeddings.weight.clone())
+
+    mine.unembed_bias.detach().copy_(hf_bert.cls.predictions.decoder.bias)
+
+    fail = False
+    for name, p in mine.named_parameters():
+        if t.isnan(p).any():
+            print(f"Forgot to initialize: {name}")
+            fail = True
+        else:
+            p.requires_grad_(True)
+    assert not fail
+    return mine
+
+
+if MAIN:
+    my_bert = load_pretrained_weights(config)
+    for name, p in my_bert.named_parameters():
+        assert (
+            p.is_leaf
+        ), "Parameter {name} is not a leaf node, which will cause problems in training. Try adding detach() somewhere."
+    print("Load pretrained weights passed")
