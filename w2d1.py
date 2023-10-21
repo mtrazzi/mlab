@@ -192,7 +192,6 @@ class BertMLP(nn.Module):
         self.second_linear = nn.Linear(config.intermediate_size, config.hidden_size)
         self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout)
-        self.gelu = nn.GELU()
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         """x has shape (batch, seq, hidden_size)."""
@@ -247,3 +246,90 @@ class BertBlock(nn.Module):
 
 if MAIN:
     w2d1_test.test_bert_block(BertBlock)
+
+
+def make_additive_attention_mask(one_zero_attention_mask: t.Tensor, big_negative_number: float = -10000) -> t.Tensor:
+    """
+    one_zero_attention_mask: shape (batch, seq). Contains 1 if this is a valid token and 0 if it is a padding token.
+    big_negative_number: Any negative number large enough in magnitude that exp(big_negative_number) is 0.0 for the floating point precision used.
+
+    Out: shape (batch, heads, seq, seq). Contains 0 if attention is allowed, and big_negative_number if it is not allowed.
+    """
+    # TODO: make sure shape is correct
+    return (1 - one_zero_attention_mask) * big_negative_number
+
+
+class BertCommon(nn.Module):
+    token_embedding: Embedding
+    pos_embedding: Embedding
+    token_type_embedding: Embedding
+    layer_norm: nn.LayerNorm
+    blocks: utils.StaticModuleList[BertBlock]
+
+    def __init__(self, config: BertConfig):
+        super().__init__()
+        self.token_embedding = Embedding(config.vocab_size, config.hidden_size)
+        self.pos_embedding = Embedding(config.max_position_embeddings, config.hidden_size)
+        self.token_type_embedding = Embedding(config.type_vocab_size, config.hidden_size)
+        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+        self.dropout = nn.Dropout(config.dropout)
+        self.blocks = utils.StaticModuleList([BertBlock(config) for _ in range(config.num_layers)])
+
+    def forward(
+        self,
+        input_ids: t.Tensor,
+        token_type_ids: Optional[t.Tensor] = None,
+        one_zero_attention_mask: Optional[t.Tensor] = None,
+    ) -> t.Tensor:
+        """
+        input_ids: (batch, seq) - the token ids
+        token_type_ids: (batch, seq) - only used for next sentence prediction.
+        one_zero_attention_mask: (batch, seq) - only used in training. See make_additive_attention_mask.
+        """
+        pos_idxs = t.arange(0, input_ids.shape[-1])
+        pos_emb = self.pos_embedding(pos_idxs)
+        tok_emb = self.token_embedding(input_ids)
+        x = pos_emb + tok_emb
+        mask = make_additive_attention_mask(one_zero_attention_mask) if one_zero_attention_mask else None
+        if token_type_ids:
+            x += self.token_type_embedding(token_type_ids)
+        x = self.layer_norm(x)
+        x = self.dropout(x)
+        for block in self.blocks:
+            x = block(x, mask)
+        return x
+
+
+class BertLanguageModel(nn.Module):
+    common: BertCommon
+    lm_linear: nn.Linear
+    lm_layer_norm: nn.LayerNorm
+    unembed_bias: nn.Parameter
+
+    def __init__(self, config: BertConfig):
+        super().__init__()
+        self.common = BertCommon(config)
+        self.lm_linear = nn.Linear(config.hidden_size, config.hidden_size)
+        self.lm_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+        self.unembed_bias = nn.Parameter(t.zeros(config.vocab_size))
+
+    def forward(
+        self,
+        input_ids: t.Tensor,
+        token_type_ids: Optional[t.Tensor] = None,
+        one_zero_attention_mask: Optional[t.Tensor] = None,
+    ) -> t.Tensor:
+        """Compute logits for each token in the vocabulary.
+
+        Return: shape (batch, seq, vocab_size)
+        """
+        x = self.common(input_ids, token_type_ids, one_zero_attention_mask)
+        x = self.lm_linear(x)
+        x = F.gelu(x)
+        x = self.lm_layer_norm(x)
+        logits = F.linear(x, self.common.token_embedding.weight, self.unembed_bias)
+        return logits
+
+
+if MAIN:
+    w2d1_test.test_bert(BertLanguageModel)
