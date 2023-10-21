@@ -88,7 +88,9 @@ class BertSelfAttention(nn.Module):
         attn_probs = t.softmax(attn_sc, dim=-1)
 
         V = rearrange(V, "b s (nh hs) -> b nh s hs", nh=self.config.num_heads, hs=self.config.head_size)
-        values = t.einsum("bhki,bhqk->bqhi", V, attn_probs)
+        values = t.einsum(
+            "bhki,bhqk->bqhi", V, attn_probs
+        )  # Note: order of V first or attn_probs first makes test pass or fail
         values = rearrange(values, "b s nh hs -> b s (nh hs)")
         output = self.project_output(values)
         return output
@@ -110,39 +112,90 @@ if MAIN:
     w2d1_test.test_attention_pattern_pre_softmax(BertSelfAttention)
     w2d1_test.test_attention(BertSelfAttention)
 
+## My Old LayerNorm class that doesn't work ##
+
+
+# class LayerNorm(nn.Module):
+#     weight: nn.Parameter
+#     bias: nn.Parameter
+
+#     def __init__(
+#         self, normalized_shape: Union[int, tuple, t.Size], eps=1e-05, elementwise_affine=True, device=None, dtype=None
+#     ):
+#         super(LayerNorm, self).__init__()
+#         self.normalized_shape = normalized_shape
+#         self.device = device
+#         self.dtype = dtype
+#         self.eps = eps
+#         self.elementwise_affine = elementwise_affine
+#         if elementwise_affine:
+#             self.reset_parameters()
+
+#     def reset_parameters(self) -> None:
+#         """Initialize the weight and bias, if applicable."""
+#         self.weight = nn.Parameter(t.ones(self.normalized_shape, dtype=self.dtype, device=self.device))
+#         self.bias = nn.Parameter(t.zeros(self.normalized_shape, dtype=self.dtype, device=self.device))
+
+#     def forward(self, x: t.Tensor) -> t.Tensor:
+#         """x and the output should both have shape (batch, *)."""
+#         mean = x.mean(dim=-1, keepdim=True)
+#         var = x.var(dim=-1, keepdim=True, unbiased=False)
+#         if self.elementwise_affine:
+#             y = self.weight * ((x - mean) / t.sqrt(var + self.eps)) + self.bias
+#         else:
+#             y = (x - mean) / t.sqrt(var + self.eps)
+#         return y
+
+
 # %%
-
-
 class LayerNorm(nn.Module):
     weight: nn.Parameter
     bias: nn.Parameter
 
     def __init__(
-        self, normalized_shape: Union[int, tuple, t.Size], eps=1e-05, elementwise_affine=True, device=None, dtype=None
+        self,
+        normalized_shape: Union[int, tuple, t.Size],
+        eps=1e-5,
+        elementwise_affine=True,
+        device=None,
+        dtype=None,
     ):
-        super(LayerNorm, self).__init__()
-        self.normalized_shape = normalized_shape
-        self.device = device
-        self.dtype = dtype
+        "SOLUTION"
+        super().__init__()
+        if isinstance(normalized_shape, int):
+            normalized_shape = (normalized_shape,)
+        self.normalized_shape = tuple(normalized_shape)
+        self.normalize_dims = tuple(range(-1, -1 - len(self.normalized_shape), -1))
         self.eps = eps
         self.elementwise_affine = elementwise_affine
-        if elementwise_affine:
-            self.reset_parameters()
+        if self.elementwise_affine:
+            self.weight = nn.Parameter(t.empty(self.normalized_shape, device=device, dtype=dtype))  # type: ignore
+            self.bias = nn.Parameter(t.empty(self.normalized_shape, device=device, dtype=dtype))  # type: ignore
+        else:
+            self.register_parameter("weight", None)
+            self.register_parameter("bias", None)
+        self.reset_parameters()
 
     def reset_parameters(self) -> None:
         """Initialize the weight and bias, if applicable."""
-        self.weight = nn.Parameter(t.ones(self.normalized_shape, dtype=self.dtype, device=self.device))
-        self.bias = nn.Parameter(t.zeros(self.normalized_shape, dtype=self.dtype, device=self.device))
+        "SOLUTION"
+        if self.elementwise_affine:
+            nn.init.ones_(self.weight)
+            nn.init.zeros_(self.bias)
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         """x and the output should both have shape (batch, *)."""
-        mean = x.mean(dim=-1, keepdim=True)
-        var = x.var(dim=-1, keepdim=True, unbiased=False)
+        "SOLUTION"
+        # Chris: MLAB1 repo solution had .detach() here but I think that is wrong
+        mean = x.mean(dim=self.normalize_dims, keepdim=True)
+        var = x.var(dim=self.normalize_dims, keepdim=True, unbiased=False)
+
+        x = x - mean
+        x = x / ((var + self.eps) ** 0.5)
         if self.elementwise_affine:
-            y = self.weight * ((x - mean) / t.sqrt(var + self.eps)) + self.bias
-        else:
-            y = (x - mean) / t.sqrt(var + self.eps)
-        return y
+            x = x * self.weight
+            x = x + self.bias
+        return x
 
 
 if MAIN:
@@ -184,13 +237,13 @@ if MAIN:
 class BertMLP(nn.Module):
     first_linear: nn.Linear
     second_linear: nn.Linear
-    layer_norm: nn.LayerNorm
+    layer_norm: LayerNorm
 
     def __init__(self, config: BertConfig):
         super().__init__()
         self.first_linear = nn.Linear(config.hidden_size, config.intermediate_size)
         self.second_linear = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+        self.layer_norm = LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x: t.Tensor) -> t.Tensor:
@@ -210,13 +263,13 @@ if MAIN:
 
 class BertAttention(nn.Module):
     self_attn: BertSelfAttention
-    layer_norm: nn.LayerNorm
+    layer_norm: LayerNorm
 
     def __init__(self, config: BertConfig):
         super().__init__()
         self.self_attn = BertSelfAttention(config)
         self.dropout = nn.Dropout(config.dropout)
-        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+        self.layer_norm = LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
 
     def forward(self, x: t.Tensor, additive_attention_mask: Optional[t.Tensor] = None) -> t.Tensor:
         y = self.self_attn(x, additive_attention_mask)
@@ -263,7 +316,7 @@ class BertCommon(nn.Module):
     token_embedding: Embedding
     pos_embedding: Embedding
     token_type_embedding: Embedding
-    layer_norm: nn.LayerNorm
+    layer_norm: LayerNorm
     blocks: utils.StaticModuleList[BertBlock]
 
     def __init__(self, config: BertConfig):
@@ -271,7 +324,7 @@ class BertCommon(nn.Module):
         self.token_embedding = Embedding(config.vocab_size, config.hidden_size)
         self.pos_embedding = Embedding(config.max_position_embeddings, config.hidden_size)
         self.token_type_embedding = Embedding(config.type_vocab_size, config.hidden_size)
-        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+        self.layer_norm = LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
         self.dropout = nn.Dropout(config.dropout)
         self.blocks = utils.StaticModuleList([BertBlock(config) for _ in range(config.num_layers)])
 
@@ -286,13 +339,18 @@ class BertCommon(nn.Module):
         token_type_ids: (batch, seq) - only used for next sentence prediction.
         one_zero_attention_mask: (batch, seq) - only used in training. See make_additive_attention_mask.
         """
-        pos_idxs = t.arange(0, input_ids.shape[-1])
+        if token_type_ids is None:
+            token_type_ids = t.zeros_like(input_ids, dtype=t.int64)
+        pos_idxs = t.arange(input_ids.shape[1]).to(input_ids.device)
+        pos_idxs = repeat(pos_idxs, "n -> b n", b=input_ids.shape[0])
+
+        mask = make_additive_attention_mask(one_zero_attention_mask) if one_zero_attention_mask is not None else None
+
         pos_emb = self.pos_embedding(pos_idxs)
         tok_emb = self.token_embedding(input_ids)
-        x = pos_emb + tok_emb
-        mask = make_additive_attention_mask(one_zero_attention_mask) if one_zero_attention_mask else None
-        if token_type_ids:
-            x += self.token_type_embedding(token_type_ids)
+        tok_type_emb = self.token_type_embedding(token_type_ids)
+        x = tok_emb + tok_type_emb + pos_emb  # Note: order here changes if tests pass or not
+
         x = self.layer_norm(x)
         x = self.dropout(x)
         for block in self.blocks:
@@ -303,14 +361,14 @@ class BertCommon(nn.Module):
 class BertLanguageModel(nn.Module):
     common: BertCommon
     lm_linear: nn.Linear
-    lm_layer_norm: nn.LayerNorm
+    lm_layer_norm: LayerNorm
     unembed_bias: nn.Parameter
 
     def __init__(self, config: BertConfig):
         super().__init__()
         self.common = BertCommon(config)
         self.lm_linear = nn.Linear(config.hidden_size, config.hidden_size)
-        self.lm_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+        self.lm_layer_norm = LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
         self.unembed_bias = nn.Parameter(t.zeros(config.vocab_size))
 
     def forward(
