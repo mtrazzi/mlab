@@ -151,3 +151,31 @@ if MAIN:
     w2d1_test.test_layernorm_std(LayerNorm)
     w2d1_test.test_layernorm_exact(LayerNorm)
     w2d1_test.test_layernorm_backward(LayerNorm)
+
+
+class Embedding(nn.Module):
+    num_embeddings: int
+    embedding_dim: int
+    weight: nn.Parameter
+
+    def __init__(self, num_embeddings: int, embedding_dim: int):
+        super().__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.weight = nn.Parameter(t.randn(num_embeddings, embedding_dim) * 0.02)
+
+    def forward(self, x: t.LongTensor) -> t.Tensor:
+        """For each integer in the input, return that row of the embedding.
+
+        Don't convert x to one-hot vectors - this works but is too slow.
+        """
+        return self.weight[x]
+
+    def extra_repr(self) -> str:
+        return f"{self.num_embeddings}, {self.embedding_dim}"
+
+
+if MAIN:
+    assert repr(Embedding(10, 20)) == repr(t.nn.Embedding(10, 20))
+    w2d1_test.test_embedding(Embedding)
+    w2d1_test.test_embedding_std(Embedding)
