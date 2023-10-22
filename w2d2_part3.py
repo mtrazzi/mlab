@@ -117,5 +117,13 @@ def random_mask(
     return unflat(model_input, max_seq=max_seq), unflat(selected, max_seq=max_seq)
 
 
+# if MAIN:
+#     w2d2_test.test_random_mask(random_mask, input_size=1000000, max_seq=max_seq)
+
 if MAIN:
-    w2d2_test.test_random_mask(random_mask, input_size=1000000, max_seq=max_seq)
+    # Cross Entropy Loss Of Unigram Predictions
+    all_tokens = t.concat([train_data, val_data, test_data]).flatten()
+    token_counts = t.bincount(all_tokens)
+    unigram = token_counts / sum(token_counts)
+    print(f"Loss of unigram is {t.distributions.Categorical(unigram).entropy()}")
+# %%
