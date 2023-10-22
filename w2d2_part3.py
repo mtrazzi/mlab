@@ -14,6 +14,7 @@ from torch.nn import functional as F
 from tqdm.auto import tqdm
 import w2d2_test
 from w2d2_part1_data_prep_solution import maybe_download
+from ipdb import set_trace as p
 
 # %load_ext autoreload
 # %autoreload 2
@@ -127,3 +128,29 @@ if MAIN:
     unigram = token_counts / sum(token_counts)
     print(f"Loss of unigram is {t.distributions.Categorical(unigram).entropy()}")
 # %%
+
+def cross_entropy_selected(pred: t.Tensor, target: t.Tensor, was_selected: t.Tensor) -> t.Tensor:
+    """
+    pred: (batch, seq, vocab_size) - predictions from the model
+    target: (batch, seq, ) - the original (not masked) input ids
+    was_selected: (batch, seq) - 1 if the token at this index will contribute to the MLM loss, 0 otherwise
+
+    Out: the mean loss per predicted token
+    """
+    if t.all(was_selected == 0):
+        return t.tensor([t.nan])
+    idxs = t.nonzero(flat(was_selected)).flatten()
+    loss = t.nn.functional.cross_entropy(flat(pred)[idxs], flat(target)[idxs])
+    return loss
+
+
+if MAIN:
+    w2d2_test.test_cross_entropy_selected(cross_entropy_selected)
+if MAIN and (not IS_CI):
+    batch_size = 8
+    seq_length = 512
+    batch = t.randint(0, tokenizer.vocab_size, (batch_size, seq_length))
+    pred = t.rand((batch_size, seq_length, tokenizer.vocab_size))
+    (masked, was_selected) = random_mask(batch, tokenizer.mask_token_id, tokenizer.vocab_size)
+    loss = cross_entropy_selected(pred, batch, was_selected).item()
+    print(f"Random MLM loss on random tokens - does this make sense? {loss:.2f}")
