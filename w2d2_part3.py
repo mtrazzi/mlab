@@ -140,6 +140,8 @@ def cross_entropy_selected(pred: t.Tensor, target: t.Tensor, was_selected: t.Ten
     if t.all(was_selected == 0):
         return t.tensor([t.nan])
     idxs = t.nonzero(flat(was_selected)).flatten()
+    # here by using the cross_entropy on the problematic indexes we're dividing by the number of predicted
+    # since the cross_entropy function divides by the number of "batches"
     loss = t.nn.functional.cross_entropy(flat(pred)[idxs], flat(target)[idxs])
     return loss
 
