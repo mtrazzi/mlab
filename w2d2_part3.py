@@ -74,3 +74,48 @@ if MAIN and (not IS_CI):
     test_data = tokenize_1d(tokenizer, test_text, max_seq)
     print("Saving tokens to: ", TOKENS_FILENAME)
     t.save((train_data, val_data, test_data), TOKENS_FILENAME)
+
+
+def flat(x: t.Tensor) -> t.Tensor:
+    """Helper function for combining batch and sequence dimensions."""
+    return rearrange(x, "b s ... -> (b s) ...")
+
+
+def unflat(x: t.Tensor, max_seq: int) -> t.Tensor:
+    """Helper function for separating batch and sequence dimensions."""
+    return rearrange(x, "(b s) ... -> b s ...", s=max_seq)
+
+
+def random_mask(
+    input_ids: t.Tensor, mask_token_id: int, vocab_size: int, select_frac=0.15, mask_frac=0.8, random_frac=0.1
+) -> tuple[t.Tensor, t.Tensor]:
+    """Given a batch of tokens, return a copy with tokens replaced according to Section 3.1 of the paper.
+
+    input_ids:  (batch, seq)
+
+    Return: (model_input, was_selected) where:
+
+    model_input: (batch, seq) - a new Tensor with the replacements made, suitable for passing to the BertLanguageModel. Don't modify the original tensor!
+
+    was_selected: (batch, seq) - 1 if the token at this index will contribute to the MLM loss, 0 otherwise
+    """
+    # .to(input_ids.device) at some point
+    assert random_frac < (1 - mask_frac)
+    try:
+        max_seq = input_ids.shape[1]
+        flat_input = flat(input_ids)
+        rand_ten = t.rand(flat_input.shape[0])
+        selected = rand_ten < select_frac
+        to_mask = (rand_ten < mask_frac * select_frac)
+        to_rand = (rand_ten > mask_frac * select_frac) & (rand_ten < (mask_frac + random_frac) * select_frac)
+        model_input = flat_input.clone().detach()
+        model_input[t.nonzero(to_mask).flatten()] = mask_token_id
+        model_input[t.nonzero(to_rand).flatten()] = t.randint(0, vocab_size, (t.nonzero(to_rand).flatten()).shape)
+    except Exception as e:
+        print(e)
+        import ipdb; ipdb.set_trace()
+    return unflat(model_input, max_seq=max_seq), unflat(selected, max_seq=max_seq)
+
+
+if MAIN:
+    w2d2_test.test_random_mask(random_mask, input_size=1000000, max_seq=max_seq)
