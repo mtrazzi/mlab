@@ -3,6 +3,7 @@
 
 import hashlib
 import os
+import requests
 import sys
 import zipfile
 import torch as t
@@ -12,9 +13,17 @@ from einops import rearrange, repeat
 from torch import nn
 from torch.nn import functional as F
 from tqdm.auto import tqdm
-import w2d2_test
-from w2d2_part1_data_prep_solution import maybe_download
-from ipdb import set_trace as p
+
+# %%
+def maybe_download(url: str, path: str) -> None:
+    """Download the file from url and save it to path. If path already exists, do nothing."""
+    if os.path.exists(path):
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    print("Downloading:", url)
+    response = requests.get(url)
+    with open(path, "wb") as f:
+        f.write(response.content)
 
 # %load_ext autoreload
 # %autoreload 2
@@ -22,7 +31,7 @@ from ipdb import set_trace as p
 MAIN = __name__ == "__main__"
 device = t.device("cuda" if t.cuda.is_available() else "cpu")
 DATA_FOLDER = "./data/w2d2"
-DATASET = "2"
+DATASET = "103"
 BASE_URL = "https://s3.amazonaws.com/research.metamind.io/wikitext/"
 DATASETS = {"103": "wikitext-103-raw-v1.zip", "2": "wikitext-2-raw-v1.zip"}
 TOKENS_FILENAME = os.path.join(DATA_FOLDER, f"wikitext_tokens_{DATASET}.pt")
@@ -57,7 +66,11 @@ def tokenize_1d(tokenizer, lines: list[str], max_seq: int) -> t.Tensor:
 
     Return (batch, seq) and an integer dtype
     """
-    tokens = tokenizer(lines, truncation=False)
+    all_tokens = {'input_ids': [], 'token_type_ids': [], 'attention_mask': []}
+    for line in tqdm(lines):
+        tokens = tokenizer(line, truncation=False)
+        for key in all_tokens:
+            all_tokens[key] = all_tokens[key] + tokens[key]
     flattened_list = list(chain.from_iterable(tokens["input_ids"]))
     truncated_idx = len(flattened_list) - (len(flattened_list) % max_seq)
     truncated_list = flattened_list[:truncated_idx]
@@ -117,10 +130,6 @@ def random_mask(
         import ipdb; ipdb.set_trace()
     return unflat(model_input, max_seq=max_seq), unflat(selected, max_seq=max_seq)
 
-
-# if MAIN:
-#     w2d2_test.test_random_mask(random_mask, input_size=1000000, max_seq=max_seq)
-
 if MAIN:
     # Cross Entropy Loss Of Unigram Predictions
     all_tokens = t.concat([train_data, val_data, test_data]).flatten()
@@ -144,15 +153,3 @@ def cross_entropy_selected(pred: t.Tensor, target: t.Tensor, was_selected: t.Ten
     # since the cross_entropy function divides by the number of "batches"
     loss = t.nn.functional.cross_entropy(flat(pred)[idxs], flat(target)[idxs])
     return loss
-
-
-if MAIN:
-    w2d2_test.test_cross_entropy_selected(cross_entropy_selected)
-if MAIN and (not IS_CI):
-    batch_size = 8
-    seq_length = 512
-    batch = t.randint(0, tokenizer.vocab_size, (batch_size, seq_length))
-    pred = t.rand((batch_size, seq_length, tokenizer.vocab_size))
-    (masked, was_selected) = random_mask(batch, tokenizer.mask_token_id, tokenizer.vocab_size)
-    loss = cross_entropy_selected(pred, batch, was_selected).item()
-    print(f"Random MLM loss on random tokens - does this make sense? {loss:.2f}")
