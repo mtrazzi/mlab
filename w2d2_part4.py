@@ -112,3 +112,32 @@ if MAIN:
         all_params.update(group["params"])
     assert all_params == set(optimizer_test_model.parameters()), "Not all parameters were passed to optimizer!"
 
+def bert_mlm_pretrain(model: BertLanguageModel, config_dict: dict, train_loader: DataLoader) -> None:
+    """Train using masked language modelling."""
+    opt = make_optimizer(model, config_dict=config_dict)
+    def set_lr(optimizer, lr):
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+    global_step = 0
+    max_step = config_dict['epochs'] * len(train_loader)
+    for epoch in range(config_dict['epochs']):  # 10 epochs
+        for batch_idx, batch_list in enumerate(train_loader):
+            opt.zero_grad()
+            new_lr = lr_for_step(global_step, max_step, max_lr=config_dict['lr'], warmup_step_frac=config_dict['warmup_step_frac'])
+            set_lr(opt, new_lr)
+            model_inputs, was_selected = random_mask(batch_list[0], config_dict['mask_token_id'], model.config.vocab_size)
+            output = model(model_inputs)
+            loss = cross_entropy_selected(output, batch_list[0], was_selected=was_selected)
+            loss.backward()
+            opt.step()
+            print(f"step = {global_step} loss = {loss}")
+            global_step += 1
+
+        print(f"Epoch {epoch+1}, Loss: {loss.item()}")
+
+
+if MAIN:
+    model = BertLanguageModel(bert_config_tiny)
+    num_params = sum((p.nelement() for p in model.parameters()))
+    print("Number of model parameters: ", num_params)
+    bert_mlm_pretrain(model, config_dict, train_loader)
