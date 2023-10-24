@@ -79,9 +79,7 @@ class UnidirectionalAttention(nn.Module):
         attn_probs = t.softmax(attn_sc, dim=-1)
         attn_drop = self.attn_dropout(attn_probs)
 
-        values = t.einsum(
-            "bkhi,bhqk->bqhi", V, attn_probs
-        )  # Note: order of V first or attn_probs first makes test pass or fail
+        values = t.einsum("bkhi,bhqk->bqhi", V, attn_probs)
         values = rearrange(values, "b s nh hs -> b s (nh hs)")
         O = self.output_proj(values)
         out = self.resid_dropout(O)
@@ -90,3 +88,39 @@ class UnidirectionalAttention(nn.Module):
 
 if MAIN:
     w2d3_test.test_unidirectional_attn(UnidirectionalAttention)
+
+
+ACTIVATION_FUNCTIONS = dict(relu=nn.ReLU(), gelu=nn.GELU())
+
+
+class GPT2Block(nn.Module):
+    attn: UnidirectionalAttention
+    linear1: nn.Linear
+    linear2: nn.Linear
+    ln1: nn.LayerNorm
+    ln2: nn.LayerNorm
+
+    def __init__(
+        self, hidden_size: int, num_heads: int, dropout: float, layer_norm_epsilon: float, activation_function: str
+    ):
+        super().__init__()
+        self.ln1 = nn.LayerNorm(hidden_size, eps=layer_norm_epsilon)
+        self.attn = UnidirectionalAttention(hidden_size, num_heads)
+        self.ln2 = nn.LayerNorm(hidden_size, eps=layer_norm_epsilon)
+        self.linear1 = nn.Linear(hidden_size, 4 * hidden_size)
+        self.linear2 = nn.Linear(4 * hidden_size, hidden_size)
+        self.dropout = nn.Dropout(dropout)
+        self.act = ACTIVATION_FUNCTIONS[activation_function]
+
+    def forward(self, x: t.Tensor, cache: Optional[Any] = None) -> t.Tensor:
+        """
+        x: shape (batch, seq, hidden_size)
+
+        Return: shape (batch, seq, hidden_size)
+        """
+        x += self.attn(self.ln1(x))
+        x += self.dropout(self.linear2(self.act(self.linear1(self.ln2(x)))))
+        return x
+
+if MAIN:
+    w2d3_test.test_gpt_block(GPT2Block)
