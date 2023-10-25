@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import os
 import sys
 from dataclasses import dataclass
@@ -17,3 +19,123 @@ if IS_CI:
 if MAIN:
     my_gpt = load_pretrained_weights().eval()
     tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
+
+def sample_next_token(
+    model: GPT2, input_ids: t.Tensor, temperature=1.0, freq_penalty=0.0, top_k=0, top_p=0.0, cache=None
+) -> int:
+    """Return the next token, sampled from the model's probability distribution with modifiers.
+
+    input_ids: shape (seq,)
+    """
+    assert input_ids.ndim == 1, "input_ids should be a 1D sequence of token ids"
+    assert temperature >= 0
+    assert 0 <= top_p <= 1.0, "Top-p must be a probability"
+    assert 0 <= top_k, "Top-k must be non-negative"
+    assert not (top_p != 0 and top_k != 0), "At most one of top-p and top-k supported"
+    model.eval()
+    with t.inference_mode():
+        all_logits = model(input_ids.unsqueeze(0), cache=cache)
+    (B, S, V) = all_logits.shape
+    assert B == 1
+    assert S == len(input_ids)
+    logits = all_logits[0, -1]
+    if temperature == 0:
+        return greedy_search(logits)
+    logits = apply_temperature(logits, temperature)
+    logits = apply_freq_penalty(input_ids, logits, freq_penalty)
+    if top_k > 0:
+        return sample_top_k(logits, top_k)
+    if top_p > 0:
+        return sample_top_p(logits, top_p)
+    return sample_basic(logits)
+
+
+def sample_tokens(
+    model: GPT2,
+    tokenizer,
+    initial_text: str,
+    max_tokens_generated=30,
+    temperature=1.0,
+    freq_penalty=0.0,
+    stop_at_eos=True,
+    top_k=0,
+    top_p=0.0,
+    cache=None,
+) -> str:
+    """Sample tokens using sample_next_token until the model outputs `tokenizer.eos_token_id` or the specified token limit is reached.
+
+    Return: the prompt and continuation concatenated
+    """
+    model.eval()
+    input_ids: list = tokenizer(initial_text).input_ids
+    generated = []
+    device = next(model.parameters()).device
+    for _ in tqdm(range(max_tokens_generated)):
+        new_token = sample_next_token(
+            model,
+            t.tensor(input_ids + generated, dtype=t.int64, device=device),
+            temperature=temperature,
+            freq_penalty=freq_penalty,
+            top_k=top_k,
+            top_p=top_p,
+            cache=cache,
+        )
+        generated.append(new_token)
+        if stop_at_eos and new_token == tokenizer.eos_token_id:
+            break
+    return tokenizer.decode(input_ids + generated)
+
+def greedy_search(logits: t.Tensor) -> int:
+    """
+    logits: shape (vocab_size, )
+
+    Return: the most likely token
+    """
+    tok = logits.argmax().item()
+    assert isinstance(tok, int)
+    return tok
+
+if MAIN:
+    logits = t.ones(100)
+    logits[5] = 10
+    logits[8] = 10
+    assert greedy_search(logits) == 5
+    w2d3_test.test_sample_zero_temperature(my_gpt, tokenizer, sample_tokens)
+
+def apply_temperature(logits: t.Tensor, temperature: float) -> t.Tensor:
+    """
+    logits: shape (vocab_size, )
+
+    Return: shape (vocab_size, )
+    """
+    assert temperature > 0
+    return logits / temperature
+
+
+if MAIN:
+    logits = t.tensor([1, 2]).log()
+    cold_logits = apply_temperature(logits, 0.001)
+    print('A low temperature "sharpens" or "peaks" the distribution: ', cold_logits)
+    utils.allclose(cold_logits, 1000.0 * logits)
+    hot_logits = apply_temperature(logits, 1000.0)
+    print("A high temperature flattens the distribution: ", hot_logits)
+    utils.allclose(hot_logits, 0.001 * logits)
+
+
+def apply_freq_penalty(input_ids: t.Tensor, logits: t.Tensor, freq_penalty: float) -> t.Tensor:
+    """
+    input_ids: shape (seq, )
+    logits: shape (vocab_size, )
+
+    Return: shape (vocab_size, )
+    """
+    return logits - freq_penalty * t.bincount(input_ids, minlength=logits.shape[0])
+
+
+if MAIN:
+    bieber_prompt = "And I was like Baby, baby, baby, oh Like, Baby, baby, baby, no Like, Baby, baby, baby, oh I thought you'd always be mine, mine"
+    input_ids = tokenizer(bieber_prompt, return_tensors="pt")["input_ids"][0]
+    logits = t.ones(tokenizer.vocab_size)
+    penalized_logits = apply_freq_penalty(input_ids, logits, 2.0)
+    assert penalized_logits[5156].item() == -11, "Expected 6 occurrences of ' baby' with leading space"
+    assert penalized_logits[14801].item() == -5, "Expected 3 occurrences of ' Baby' with leading space"
