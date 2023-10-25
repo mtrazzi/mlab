@@ -10,6 +10,8 @@ from tqdm.auto import tqdm
 import utils
 import w2d3_test
 from w2d3_part1_loading_solution import GPT2, GPT2Block, load_pretrained_weights
+import torch.nn.functional as F
+
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 MAIN = __name__ == "__main__"
@@ -191,14 +193,70 @@ def sample_top_k(logits: t.Tensor, top_k: int) -> int:
     return sample_basic(out)
 
 
+# if MAIN:
+#     k, N = 3, 10000
+#     probs = t.linspace(0, 0.4, 5)
+#     unnormalized_logits = probs.log() + 1.2345
+#     samples = t.tensor([sample_top_k(unnormalized_logits, k) for _ in range(N)])
+#     counts = t.bincount(samples, minlength=len(probs)) / N
+#     expected = probs.clone()
+#     expected[:-k] = 0
+#     expected /= expected.sum()
+#     print("Checking empirical frequencies (try to increase N if this test fails): ", counts)
+#     utils.allclose_atol(counts, expected, atol=0.01)
+
+# if MAIN:
+#     your_prompt = "In a shocking finding, scientist discovered a herd of unicorns living in a remote, previously unexplored valley, in the Andes Mountains. Even more surprising to the researchers was the fact that the unicorns spoke perfect English."
+#     output = sample_tokens(my_gpt, tokenizer, your_prompt, temperature=0.7, top_k=40, max_tokens_generated=64)
+#     print(f"Your model said: {repr(output)}")
+
+def sample_top_p(logits: t.Tensor, top_p: float, min_tokens_to_keep: int = 1) -> int:
+    """
+    logits: shape (vocab_size, ) - unnormalized log-probabilities
+
+    Return: a sampled token
+    """
+    sorted_logits, indices = t.sort(logits)
+    # Convert logits to probabilities
+    probs = F.softmax(sorted_logits, dim=-1)
+
+    # Compute cumulative probabilities
+    cumulative_probs = t.cumsum(probs, dim=-1)
+
+    # Find the cutoff point
+    cutoff_index = t.where(cumulative_probs >= top_p)[0][0].item()
+
+    kept_token_indices = indices[min(cutoff_index, indices.shape[0] - min_tokens_to_keep):]
+    kept_logits = sorted_logits[kept_token_indices]
+    kept_idx = sample_basic(kept_logits)
+    out = kept_token_indices[kept_idx].item()
+    assert isinstance(out, int)
+    return out
+
+
 if MAIN:
-    k, N = 3, 10000
+    N = 2000
+    unnormalized_logits = t.tensor([0.2, 0.3, 0.5]).log() + 2.3456
+    samples = t.tensor([sample_top_p(unnormalized_logits, 0.5) for _ in range(N)])
+    counts = t.bincount(samples, minlength=len(unnormalized_logits)) / N
+    print("top_p of 0.5 or lower should only return token 2: ", counts)
+    assert counts[0] == 0 and counts[1] == 0
+if MAIN:
+    N = 2000
+    unnormalized_logits = t.tensor([0.2, 0.3, 0.5]).log() + 2.3456
+    samples = t.tensor([sample_top_p(unnormalized_logits, 0.50001) for _ in range(N)])
+    counts = t.bincount(samples, minlength=len(unnormalized_logits)) / N
+    print("top_p in (0.5, 0.8] should return tokens 1 and 2: ", counts)
+    assert counts[0] == 0
+if MAIN:
+    N = 2000
+    top_p = 0.71
     probs = t.linspace(0, 0.4, 5)
     unnormalized_logits = probs.log() + 1.2345
-    samples = t.tensor([sample_top_k(unnormalized_logits, k) for _ in range(N)])
+    samples = t.tensor([sample_top_p(unnormalized_logits, top_p) for _ in range(N)])
     counts = t.bincount(samples, minlength=len(probs)) / N
     expected = probs.clone()
-    expected[:-k] = 0
+    expected[0:2] = 0
     expected /= expected.sum()
     print("Checking empirical frequencies (try to increase N if this test fails): ", counts)
     utils.allclose_atol(counts, expected, atol=0.01)
