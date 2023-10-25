@@ -186,13 +186,13 @@ def sample_top_k(logits: t.Tensor, top_k: int) -> int:
     Return: a sampled token
     """
     values, indices = t.topk(logits, top_k)
-    out = t.zeros_like(logits, device=logits.device)
+    out = t.zeros_like(logits, device=logits.device) - t.inf
     out[indices] = values
     return sample_basic(out)
 
 
 if MAIN:
-    k, N = 3, 1
+    k, N = 3, 10000
     probs = t.linspace(0, 0.4, 5)
     unnormalized_logits = probs.log() + 1.2345
     samples = t.tensor([sample_top_k(unnormalized_logits, k) for _ in range(N)])
