@@ -161,18 +161,44 @@ def sample_basic(logits: t.Tensor) -> int:
 #     print("Checking empirical frequencies (try to increase N if this test fails): ", counts)
 #     utils.allclose_atol(counts, probs, atol=0.01)
 
+# if MAIN:
+#     N_RUNS = 5
+#     your_prompt = "Barack Obama is the president of the "
+#     cases = [
+#         ("High freq penalty", dict(freq_penalty=100.0)),
+#         ("Negative freq penalty", dict(freq_penalty=-1.0)),
+#         ("Too hot!", dict(temperature=2.0)),
+#         ("Pleasantly cool", dict(temperature=0.7)),
+#         ("Pleasantly warm", dict(temperature=0.9)),
+#     ]
+#     for (name, kwargs) in cases:
+#         for i in range(N_RUNS):
+#             output = sample_tokens(my_gpt, tokenizer, your_prompt, max_tokens_generated=24, **kwargs)
+#             print(f"Sample {i} with: {name} ({kwargs}):")
+#             print(f"Your model said: {repr(output)}")
+
+
+def sample_top_k(logits: t.Tensor, top_k: int) -> int:
+    """
+    logits: shape (vocab_size, ) - unnormalized log-probabilities
+    top_k: only consider this many of the most likely tokens for sampling
+
+    Return: a sampled token
+    """
+    values, indices = t.topk(logits, top_k)
+    out = t.zeros_like(logits, device=logits.device)
+    out[indices] = values
+    return sample_basic(out)
+
+
 if MAIN:
-    N_RUNS = 5
-    your_prompt = "Barack Obama is the president of the "
-    cases = [
-        ("High freq penalty", dict(freq_penalty=100.0)),
-        ("Negative freq penalty", dict(freq_penalty=-1.0)),
-        ("Too hot!", dict(temperature=2.0)),
-        ("Pleasantly cool", dict(temperature=0.7)),
-        ("Pleasantly warm", dict(temperature=0.9)),
-    ]
-    for (name, kwargs) in cases:
-        for i in range(N_RUNS):
-            output = sample_tokens(my_gpt, tokenizer, your_prompt, max_tokens_generated=24, **kwargs)
-            print(f"Sample {i} with: {name} ({kwargs}):")
-            print(f"Your model said: {repr(output)}")
+    k, N = 3, 1
+    probs = t.linspace(0, 0.4, 5)
+    unnormalized_logits = probs.log() + 1.2345
+    samples = t.tensor([sample_top_k(unnormalized_logits, k) for _ in range(N)])
+    counts = t.bincount(samples, minlength=len(probs)) / N
+    expected = probs.clone()
+    expected[:-k] = 0
+    expected /= expected.sum()
+    print("Checking empirical frequencies (try to increase N if this test fails): ", counts)
+    utils.allclose_atol(counts, expected, atol=0.01)
