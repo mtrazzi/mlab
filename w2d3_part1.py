@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 import torch as t
 import transformers
-from einops import rearrange
+from einops import rearrange, repeat
 from fancy_einsum import einsum
 from torch import nn
 import utils
@@ -15,7 +15,6 @@ from ipdb import set_trace as p
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 MAIN = __name__ == "__main__"
-
 
 @dataclass(frozen=True)
 class GPTConfig:
@@ -124,3 +123,43 @@ class GPT2Block(nn.Module):
 
 if MAIN:
     w2d3_test.test_gpt_block(GPT2Block)
+
+class GPT2(nn.Module):
+    token_embedding: nn.Embedding
+    pos_embedding: nn.Embedding
+    ln: nn.LayerNorm
+    blocks: utils.StaticModuleList[GPT2Block]
+
+    def __init__(self, config: GPTConfig):
+        super().__init__()
+        self.token_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
+        self.pos_embedding = nn.Embedding(config.max_position_embeddings, config.hidden_size)
+        self.ln = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+        self.blocks = utils.StaticModuleList([GPT2Block(config.hidden_size, config.num_heads, config.dropout, config.layer_norm_epsilon, config.activation_function) for _ in range(config.num_layers)])
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x: t.Tensor, cache: Optional[Any] = None) -> t.Tensor:
+        """
+        x: shape (batch, seq), dtype t.int64 - the token ids
+
+        Return: shape (batch, seq, vocab_size), dtype t.float32- the output logits
+        """
+        pos_idxs = t.arange(x.shape[1]).to(x.device)
+        pos_idxs = repeat(pos_idxs, "n -> b n", b=x.shape[0])
+
+        pos_emb = self.pos_embedding(pos_idxs)
+        tok_emb = self.token_embedding(x)
+
+        x = pos_emb + tok_emb
+        x = self.dropout(x)
+        for block in self.blocks:
+            x = block(x)
+        x = self.ln(x)
+
+        x_reshaped = rearrange(x, 'b n d -> (b n) d')
+        unembedding = t.einsum('ij,kj->ik', x_reshaped, self.token_embedding.weight)
+        unembedding = rearrange(unembedding, '(b n) d -> b n d', b=x.shape[0])
+        return unembedding  
+
+if MAIN:
+    w2d3_test.test_gpt(GPT2)
