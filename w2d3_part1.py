@@ -156,10 +156,43 @@ class GPT2(nn.Module):
             x = block(x)
         x = self.ln(x)
 
-        x_reshaped = rearrange(x, 'b n d -> (b n) d')
-        unembedding = t.einsum('ij,kj->ik', x_reshaped, self.token_embedding.weight)
-        unembedding = rearrange(unembedding, '(b n) d -> b n d', b=x.shape[0])
-        return unembedding  
+        x = t.einsum("bnh, vh -> bnv", x, self.token_embedding.weight)
+        return x
 
 if MAIN:
     w2d3_test.test_gpt(GPT2)
+
+def _copy_weight_bias(mine, theirs, transpose=False):
+    mine.weight.copy_(theirs.weight.T if transpose else theirs.weight)
+    if mine.bias is not None:
+        mine.bias.copy_(theirs.bias)
+
+
+def load_pretrained_weights():
+    pretrained_gpt = utils.load_pretrained_gpt()
+    my_gpt = GPT2(config)
+    for p in my_gpt.parameters():
+        p.requires_grad = False
+    my_gpt.token_embedding.weight.copy_(pretrained_gpt.transformer.wte.weight)
+    my_gpt.pos_embedding.weight.copy_(pretrained_gpt.transformer.wpe.weight)
+    _copy_weight_bias(my_gpt.ln, pretrained_gpt.transformer.ln_f)
+    from transformers.models.gpt2.modeling_gpt2 import GPT2Block as HFGPT2Block
+
+    my_block: GPT2Block
+    hf_block: HFGPT2Block
+    for (my_block, hf_block) in zip(my_gpt.blocks, pretrained_gpt.transformer.h):
+        _copy_weight_bias(my_block.ln1, hf_block.ln_1)
+        _copy_weight_bias(my_block.attn.qkv_proj, hf_block.attn.c_attn, transpose=True)
+        _copy_weight_bias(my_block.attn.output_proj, hf_block.attn.c_proj, transpose=True)
+        _copy_weight_bias(my_block.ln2, hf_block.ln_2)
+        _copy_weight_bias(my_block.linear1, hf_block.mlp.c_fc, transpose=True)
+        _copy_weight_bias(my_block.linear2, hf_block.mlp.c_proj, transpose=True)
+    for p in my_gpt.parameters():
+        p.requires_grad_(True)
+    return my_gpt
+
+if MAIN:
+    my_gpt = load_pretrained_weights()
+    my_gpt.eval()
+    tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
+    w2d3_test.test_load_pretrained_weights(my_gpt, tokenizer)
