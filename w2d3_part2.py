@@ -95,12 +95,12 @@ def greedy_search(logits: t.Tensor) -> int:
     assert isinstance(tok, int)
     return tok
 
-if MAIN:
-    logits = t.ones(100)
-    logits[5] = 10
-    logits[8] = 10
-    assert greedy_search(logits) == 5
-    w2d3_test.test_sample_zero_temperature(my_gpt, tokenizer, sample_tokens)
+# if MAIN:
+#     logits = t.ones(100)
+#     logits[5] = 10
+#     logits[8] = 10
+#     assert greedy_search(logits) == 5
+#     w2d3_test.test_sample_zero_temperature(my_gpt, tokenizer, sample_tokens)
 
 def apply_temperature(logits: t.Tensor, temperature: float) -> t.Tensor:
     """
@@ -112,14 +112,14 @@ def apply_temperature(logits: t.Tensor, temperature: float) -> t.Tensor:
     return logits / temperature
 
 
-if MAIN:
-    logits = t.tensor([1, 2]).log()
-    cold_logits = apply_temperature(logits, 0.001)
-    print('A low temperature "sharpens" or "peaks" the distribution: ', cold_logits)
-    utils.allclose(cold_logits, 1000.0 * logits)
-    hot_logits = apply_temperature(logits, 1000.0)
-    print("A high temperature flattens the distribution: ", hot_logits)
-    utils.allclose(hot_logits, 0.001 * logits)
+# if MAIN:
+#     logits = t.tensor([1, 2]).log()
+#     cold_logits = apply_temperature(logits, 0.001)
+#     print('A low temperature "sharpens" or "peaks" the distribution: ', cold_logits)
+#     utils.allclose(cold_logits, 1000.0 * logits)
+#     hot_logits = apply_temperature(logits, 1000.0)
+#     print("A high temperature flattens the distribution: ", hot_logits)
+#     utils.allclose(hot_logits, 0.001 * logits)
 
 
 def apply_freq_penalty(input_ids: t.Tensor, logits: t.Tensor, freq_penalty: float) -> t.Tensor:
@@ -139,3 +139,40 @@ if MAIN:
     penalized_logits = apply_freq_penalty(input_ids, logits, 2.0)
     assert penalized_logits[5156].item() == -11, "Expected 6 occurrences of ' baby' with leading space"
     assert penalized_logits[14801].item() == -5, "Expected 3 occurrences of ' Baby' with leading space"
+
+
+def sample_basic(logits: t.Tensor) -> int:
+    """
+    logits: shape (vocab_size, ) - unnormalized log-probabilities
+
+    Return: a sampled token
+    """
+    dist = t.distributions.categorical.Categorical(logits=logits)
+    tok = dist.sample().item()
+    assert isinstance(tok, int)
+    return tok
+
+# if MAIN:
+#     N = 20000
+#     probs = t.linspace(0, 0.4, 5)
+#     unnormalized_logits = probs.log() + 1.2345
+#     samples = t.tensor([sample_basic(unnormalized_logits) for _ in range(N)])
+#     counts = t.bincount(samples, minlength=len(probs)) / N
+#     print("Checking empirical frequencies (try to increase N if this test fails): ", counts)
+#     utils.allclose_atol(counts, probs, atol=0.01)
+
+if MAIN:
+    N_RUNS = 5
+    your_prompt = "Barack Obama is the president of the "
+    cases = [
+        ("High freq penalty", dict(freq_penalty=100.0)),
+        ("Negative freq penalty", dict(freq_penalty=-1.0)),
+        ("Too hot!", dict(temperature=2.0)),
+        ("Pleasantly cool", dict(temperature=0.7)),
+        ("Pleasantly warm", dict(temperature=0.9)),
+    ]
+    for (name, kwargs) in cases:
+        for i in range(N_RUNS):
+            output = sample_tokens(my_gpt, tokenizer, your_prompt, max_tokens_generated=24, **kwargs)
+            print(f"Sample {i} with: {name} ({kwargs}):")
+            print(f"Your model said: {repr(output)}")
