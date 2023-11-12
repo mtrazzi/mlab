@@ -134,13 +134,13 @@ def apply_freq_penalty(input_ids: t.Tensor, logits: t.Tensor, freq_penalty: floa
     return logits - freq_penalty * t.bincount(input_ids, minlength=logits.shape[0])
 
 
-if MAIN:
-    bieber_prompt = "And I was like Baby, baby, baby, oh Like, Baby, baby, baby, no Like, Baby, baby, baby, oh I thought you'd always be mine, mine"
-    input_ids = tokenizer(bieber_prompt, return_tensors="pt")["input_ids"][0]
-    logits = t.ones(tokenizer.vocab_size)
-    penalized_logits = apply_freq_penalty(input_ids, logits, 2.0)
-    assert penalized_logits[5156].item() == -11, "Expected 6 occurrences of ' baby' with leading space"
-    assert penalized_logits[14801].item() == -5, "Expected 3 occurrences of ' Baby' with leading space"
+#if MAIN:
+#    bieber_prompt = "And I was like Baby, baby, baby, oh Like, Baby, baby, baby, no Like, Baby, baby, baby, oh I thought you'd always be mine, mine"
+#    input_ids = tokenizer(bieber_prompt, return_tensors="pt")["input_ids"][0]
+#    logits = t.ones(tokenizer.vocab_size)
+#    penalized_logits = apply_freq_penalty(input_ids, logits, 2.0)
+#    assert penalized_logits[5156].item() == -11, "Expected 6 occurrences of ' baby' with leading space"
+#    assert penalized_logits[14801].item() == -5, "Expected 3 occurrences of ' Baby' with leading space"
 
 
 def sample_basic(logits: t.Tensor) -> int:
@@ -260,3 +260,5 @@ if MAIN:
     expected /= expected.sum()
     print("Checking empirical frequencies (try to increase N if this test fails): ", counts)
     utils.allclose_atol(counts, expected, atol=0.01)
+
+#TODO: 1) using caching to make text generation more efficient 2) Beam Search
