@@ -16,6 +16,8 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 import w2d4_test
 from w2d4_attn_only_transformer import AttnOnlyTransformer
 
+from ipdb import set_trace as p
+
 pio.renderers.default = "notebook"
 device = "cuda" if t.cuda.is_available() else "cpu"
 MAIN = __name__ == "__main__"
@@ -62,3 +64,39 @@ if MAIN:
     for activation_name in cache_example:
         activation = cache_example[activation_name]
         print(f"Activation: {activation_name} Shape: {activation.shape}")
+
+
+def mask_scores(attn_scores):
+    """Mask the attention scores so that tokens don't attend to previous tokens."""
+    mask = t.tril(t.ones_like(attn_scores)).bool()
+    neg_inf = t.tensor(-10000.0).to(attn_scores.device)
+    masked_attn_scores = t.where(mask, attn_scores, neg_inf)
+    return masked_attn_scores
+
+
+def QK_attn(W_QK, qk_input):
+    """
+    W_QK: (query_d_model, key_d_model)
+    qk_input: (position, d_model)
+    """
+    "TODO: YOUR CODE HERE"
+    attn_scores = qk_input @ W_QK @ qk_input.T
+    attn_scores = mask_scores(attn_scores)
+    out = t.softmax(attn_scores, dim=-1)
+    return out
+
+
+def run_QK_attn():
+    layer = 0
+    head_index = 0
+    batch_index = 0
+    W_Q = model.blocks[layer].attn.W_Q[head_index]
+    W_K = model.blocks[layer].attn.W_K[head_index]
+    qk_input = cache_example[f"blocks.{layer}.hook_resid_pre"][batch_index] + cache_example["hook_pos_embed"]
+    original_attn_pattern = cache_example[f"blocks.{layer}.attn.hook_attn"][batch_index, head_index, :, :]
+    W_QK = W_Q.T @ W_K
+    return (QK_attn, W_QK, qk_input, original_attn_pattern)
+
+
+if MAIN:
+    w2d4_test.test_qk_attn(*run_QK_attn())
