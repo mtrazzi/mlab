@@ -78,7 +78,7 @@ class UnidirectionalAttention(nn.Module):
         attn_probs = t.softmax(attn_sc, dim=-1)
         attn_drop = self.attn_dropout(attn_probs)
 
-        values = t.einsum("bkhi,bhqk->bqhi", V, attn_probs)
+        values = t.einsum("bkhi,bhqk->bqhi", V, attn_drop)
         values = rearrange(values, "b s nh hs -> b s (nh hs)")
         O = self.output_proj(values)
         out = self.resid_dropout(O)
