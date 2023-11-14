@@ -80,7 +80,7 @@ def QK_attn(W_QK, qk_input):
     qk_input: (position, d_model)
     """
     "TODO: YOUR CODE HERE"
-    attn_scores = qk_input @ W_QK @ qk_input.T
+    attn_scores = (qk_input @ W_QK @ qk_input.T) / cfg['d_head'] ** 0.5
     attn_scores = mask_scores(attn_scores)
     out = t.softmax(attn_scores, dim=-1)
     return out
