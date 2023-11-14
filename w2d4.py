@@ -100,3 +100,38 @@ def run_QK_attn():
 
 if MAIN:
     w2d4_test.test_qk_attn(*run_QK_attn())
+
+
+def OV_result_mix_before(W_OV, residual_stream_pre, attn_pattern):
+    """
+    Apply attention to the residual stream, and THEN apply W_OV.
+    Inputs:
+        W_OV: (d_model, d_model)
+        residual_stream_pre: (position, d_model)
+        attn_pattern: (query_pos, key_pos)
+    Returns:
+        head output of shape: (position, d_model)
+    """
+    return attn_pattern @ residual_stream_pre @ W_OV
+
+
+def run_OV_result_mix_before():
+    layer = 0
+    head_index = 0
+    batch_index = 0
+    W_O = model.blocks[layer].attn.W_O[head_index].detach().clone()
+    W_V = model.blocks[layer].attn.W_V[head_index].detach().clone()
+    W_OV = W_O @ W_V
+    residual_stream_pre = cache_example[f"blocks.{layer}.hook_resid_pre"][batch_index].detach().clone()
+    original_head_results = (
+        cache_example[f"blocks.{layer}.attn.hook_result"][batch_index, :, head_index].detach().clone()
+    )
+    attn_pattern = cache_example[f"blocks.{layer}.attn.hook_attn"][batch_index, head_index, :, :].detach().clone()
+    return (OV_result_mix_before, W_OV, residual_stream_pre, attn_pattern, original_head_results)
+
+
+if MAIN:
+    (OV_result_mix_before, W_OV, residual_stream_pre, attn_pattern, original_head_results) = run_OV_result_mix_before()
+    w2d4_test.test_ov_result_mix_before(
+        OV_result_mix_before, W_OV, residual_stream_pre, attn_pattern, original_head_results
+    )
